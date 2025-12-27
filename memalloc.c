@@ -1,8 +1,12 @@
-#include "stddef.h"
-#include "pthread.h"
+#include <stddef.h>
+#include <stdio.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <string.h>
 
 // We use a union instead of standard struct to make sure each header is aligned on 16 byte memory addresses
 typedef char ALIGN[16];
+
 union header {
 	struct {
 		size_t size;
@@ -10,12 +14,11 @@ union header {
 		union header *next;
 	} s;
 	ALIGN stub;
-}; 
+};
 typedef union header header_t;
 
 header_t *head, *tail;
 pthread_mutex_t global_malloc_lock;
-
 
 header_t *get_free_block(size_t size) {
 	header_t *curr = head;
@@ -31,10 +34,12 @@ void *memalloc(size_t size) {
 	size_t total_size;
 	void *block;
 	header_t *header;
+
 	if (!size)
 		return NULL;
 	pthread_mutex_lock(&global_malloc_lock);
-	
+
+
 	// Prefer to use an already allocated free block over taking more from the OS
 	header = get_free_block(size);
 	if (header) {
@@ -50,7 +55,7 @@ void *memalloc(size_t size) {
 		return NULL;
 	}
 	header = block;
-	header->s.size = size;
+	header->s.size = 0;
 	header->s.is_free = 0;
 	header->s.next = NULL;
 	if (!head)
@@ -93,4 +98,34 @@ void memfree(void *block) {
 	pthread_mutex_unlock(&global_malloc_lock);
 }
 
+void *contalloc(size_t num, size_t nsize) {
+	size_t size;
+	void *block;
+	if (!num || !nsize) 
+		return NULL;
+	size = num * nsize;
+	if (nsize != size / num)
+		return NULL;
+	block = memalloc(size);
+	if (!block)
+		return NULL;
+	memset(block, 0, size);
+	return block;
+}
+
+void *resizealloc(void *block, size_t size) {
+	header_t *header;
+	void *ret;
+	if (!block || !size)
+		return NULL;
+	header = (header_t*)block - 1;
+	if (header->s.size >= size)
+		return block;
+	ret = memalloc(size);
+	if (ret) {
+		memcpy(ret, block, header->s.size);
+		memfree(block);
+	}
+	return ret;
+}
 
